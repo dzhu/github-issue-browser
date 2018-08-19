@@ -1,0 +1,30 @@
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>GitHub issue browser</title>
+    <script type="text/javascript" src="elm.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.1/css/bulma.min.css">
+    <style>
+      html { overflow-y: auto; }
+      body { padding: 4px; }
+    </style>
+  </head>
+
+  <body>
+    <script>
+      // Keep '/' from opening Quick Find on Firefox.
+      document.addEventListener('keydown', (ev) => {
+        if (ev.which == 191 && ev.target.tagName != 'INPUT') {
+          ev.preventDefault();
+        }
+      });
+
+      let app = Elm.Main.fullscreen();
+      app.ports.set.subscribe((args) => {localStorage.setItem(args[0], args[1])});
+      app.ports.get.subscribe((key) => {app.ports.recv.send([key, localStorage.getItem(key)])});
+      app.ports.del.subscribe((key) => {localStorage.removeItem(key)});
+      app.ports.windowOpen.subscribe((url) => window.open(url, '_blank'));
+    </script>
+  </body>
+</html>
