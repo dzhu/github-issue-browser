@@ -29,16 +29,30 @@ parseLinksHeader str =
     Dict.fromList (List.filterMap extractLink split)
 
 
+dictGetCaseInsensitive : String -> Dict String v -> Maybe v
+dictGetCaseInsensitive needle =
+    Dict.foldl
+        (\k v x ->
+            case x of
+                Just _ ->
+                    x
+
+                Nothing ->
+                    if String.toLower k == String.toLower needle then
+                        Just v
+                    else
+                        Nothing
+        )
+        Nothing
+
+
 ghRequest : String -> Http.Body -> Maybe String -> (Result Http.Error ( Maybe String, a ) -> msg) -> Decoder a -> String -> Cmd msg
 ghRequest method body token tag decoder url =
     let
         req =
             Http.request
                 { method = method
-                , headers =
-                    [ Http.header "User-Agent" "issues-test by dzhu"
-                    , Http.header "Authorization" ("token " ++ Maybe.withDefault "" token)
-                    ]
+                , headers = [ Http.header "Authorization" ("token " ++ Maybe.withDefault "" token) ]
                 , body = body
                 , url = url
                 , expect =
@@ -46,7 +60,7 @@ ghRequest method body token tag decoder url =
                         (\resp ->
                             let
                                 next =
-                                    Dict.get "Link" resp.headers
+                                    dictGetCaseInsensitive "link" resp.headers
                                         |> Maybe.map parseLinksHeader
                                         |> Maybe.andThen (Dict.get "next")
 
