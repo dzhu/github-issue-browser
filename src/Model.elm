@@ -1,5 +1,6 @@
 module Model exposing (..)
 
+import Dict exposing (Dict)
 import Dom
 import Http
 
@@ -62,7 +63,8 @@ type alias Model =
     , token : Maybe String
     , search : String
     , repo : String
-    , issues : List Issue
+    , issues : Dict Int Issue
+    , loading : Bool
 
     -- The currently displayed issue and the location of the highlighted
     , issue : Maybe Issue

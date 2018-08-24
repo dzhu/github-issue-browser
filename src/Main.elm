@@ -1,5 +1,6 @@
 module Main exposing (..)
 
+import Dict exposing (Dict)
 import Dom
 import GitHub exposing (..)
 import Html exposing (..)
@@ -96,9 +97,10 @@ init =
             , token = Nothing
             , search = ""
             , repo = ""
-            , issues = []
+            , issues = Dict.empty
             , location = { column = -1, row = -1 }
             , issue = Nothing
+            , loading = False
             }
     in
     ( model
@@ -126,15 +128,15 @@ updateWithResponse resp model =
 
         GotIssues (Ok ( maybeNext, newIssues )) ->
             let
-                newCmd =
+                ( loading, newCmd ) =
                     case maybeNext of
                         Just next ->
-                            getIssues model.token next
+                            ( True, getIssues model.token next )
 
                         _ ->
-                            Cmd.none
+                            ( False, Cmd.none )
             in
-            ( { model | issues = model.issues ++ newIssues }, newCmd )
+            ( { model | issues = Dict.union (newIssues |> List.map (\issue -> ( issue.number, issue )) |> Dict.fromList) model.issues, loading = loading }, newCmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -205,7 +207,7 @@ update msg model =
 
                 issues =
                     model.issues
-                        |> List.map updateIssue
+                        |> Dict.map (always updateIssue)
             in
             ( { model | issues = issues, issue = Maybe.map updateIssue model.issue }, Cmd.none )
 
@@ -229,7 +231,7 @@ update msg model =
             ( { model | pendingToken = s }, Cmd.none )
 
         SetToken maybeToken ->
-            ( { model | pendingToken = "", token = maybeToken }
+            ( { model | pendingToken = "", token = maybeToken, loading = True }
             , Cmd.batch
                 [ case maybeToken of
                     Just _ ->
@@ -284,6 +286,8 @@ update msg model =
 
                         _ ->
                             NoOp
+                 else if k == 82 then
+                    SetToken model.token
                  else
                     NoOp
                 )
@@ -338,7 +342,7 @@ viewIssue issue =
         ("#"
             ++ toString issue.number
             ++ (if issue.isPR then
-                    "-pr"
+                    "-PR"
                 else
                     ""
                )
@@ -411,7 +415,9 @@ issueListColumn : Model -> Int -> Html Msg
 issueListColumn model col =
     let
         issues =
-            List.filter (issueMatch model.search col) model.issues
+            Dict.values model.issues
+                |> List.filter (issueMatch model.search col)
+                |> List.reverse
 
         columnLabels =
             priorityLabelColumns
@@ -436,7 +442,15 @@ issueListColumn model col =
     div [ class "column is-one-third" ]
         [ div [ class "has-text-centered has-text-weight-bold" ]
             (columnLabels ++ [ text <| " (" ++ toString (List.length issues) ++ ")" ])
-        , div [ class "select is-multiple is-flex", style [ ( "width", "100%" ) ] ]
+        , div
+            [ classList
+                [ ( "select", True )
+                , ( "is-multiple", True )
+                , ( "is-flex", True )
+                , ( "is-loading", model.loading )
+                ]
+            , style [ ( "width", "100%" ) ]
+            ]
             [ select
                 [ -- Force it to fill the column and match heights with all
                   -- other selects.
@@ -475,6 +489,7 @@ keybindInfo : List ( String, String )
 keybindInfo =
     [ ( "/", "focus search box (search is very basic: case-insensitive substring search within labels, titles and bodies)" )
     , ( "o", "open current issue in new window" )
+    , ( "r", "refresh issue list" )
     ]
         ++ List.indexedMap (\i l -> ( toString (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) priorityLabelColumns
 
@@ -528,7 +543,13 @@ view model =
                         [ div [ class "control" ]
                             [ button [ class "button", onClick LogOut ] [ text "log out" ]
                             ]
-                        , div [ class "control is-expanded" ]
+                        , div
+                            [ classList
+                                [ ( "control", True )
+                                , ( "is-expanded", True )
+                                , ( "is-loading", model.loading )
+                                ]
+                            ]
                             [ textInput
                                 [ id "search-input"
                                 , placeholder "Search..."
