@@ -226,7 +226,7 @@ update msg model =
             ( model, Cmd.none )
 
         InputFocused f ->
-            ( { model | inputIsFocused = f }, Cmd.none )
+            ( { model | inputIsFocused = f, issue = Nothing, location = { column = -1, row = -1 } }, Cmd.none )
 
         SetPendingToken s ->
             ( { model | pendingToken = s }, Cmd.none )
@@ -349,58 +349,56 @@ viewIssue issue =
 
 viewIssueFull : Issue -> Html Msg
 viewIssueFull issue =
-    div [ class "columns is-centered", style "margin" "0" ]
-        [ div [ class "column is-10" ]
-            [ -- Title.
-              span [ class "is-size-3" ]
-                [ a [ href issue.html_url, target "_blank" ] [ text issue.title ]
-                , text " "
-                , span [ class "has-text-grey" ] [ text ("#" ++ String.fromInt issue.number) ]
-                ]
+    span []
+        [ -- Title.
+          span [ class "is-size-3" ]
+            [ a [ href issue.html_url, target "_blank" ] [ text issue.title ]
+            , text " "
+            , span [ class "has-text-grey" ] [ text ("#" ++ String.fromInt issue.number) ]
+            ]
 
-            -- User info (opener and assignees).
-            , div []
-                ([ text "by: " ]
-                    ++ [ text issue.user.login ]
-                    ++ [ span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ] ]
-                    ++ [ text "assigned to: " ]
-                    ++ (if List.isEmpty issue.assignees then
-                            [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
-                        else
-                            List.intersperse (text ", ")
-                                (List.map (\user -> text user.login) issue.assignees)
-                       )
+        -- User info (opener and assignees).
+        , div []
+            ([ text "by: " ]
+                ++ [ text issue.user.login ]
+                ++ [ span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ] ]
+                ++ [ text "assigned to: " ]
+                ++ (if List.isEmpty issue.assignees then
+                        [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
+                    else
+                        List.intersperse (text ", ")
+                            (List.map (\user -> text user.login) issue.assignees)
+                   )
+            )
+
+        -- Label list.
+        , div [ style "margin" ".6em 0" ]
+            (List.intersperse (text " ")
+                (issue.labels
+                    |> List.map
+                        (\l ->
+                            span
+                                [ class
+                                    ("tag has-text-weight-bold "
+                                        ++ (if isDark l.color then
+                                                "has-text-white"
+                                            else
+                                                "has-text-black"
+                                           )
+                                    )
+                                , style "background-color" ("#" ++ l.color)
+                                ]
+                                [ text l.name ]
+                        )
                 )
+            )
 
-            -- Label list.
-            , div [ style "margin" ".6em 0" ]
-                (List.intersperse (text " ")
-                    (issue.labels
-                        |> List.map
-                            (\l ->
-                                span
-                                    [ class
-                                        ("tag has-text-weight-bold "
-                                            ++ (if isDark l.color then
-                                                    "has-text-white"
-                                                else
-                                                    "has-text-black"
-                                               )
-                                        )
-                                    , style "background-color" ("#" ++ l.color)
-                                    ]
-                                    [ text l.name ]
-                            )
-                    )
-                )
-
-            -- Issue body.
-            , div [ class "content" ]
-                [ if String.isEmpty issue.body then
-                    span [ class "has-text-grey-light is-italic" ] [ text "no body" ]
-                  else
-                    Html.Lazy.lazy toMarkdown issue.body
-                ]
+        -- Issue body.
+        , div [ class "content" ]
+            [ if String.isEmpty issue.body then
+                span [ class "has-text-grey-light is-italic" ] [ text "no body" ]
+              else
+                Html.Lazy.lazy toMarkdown issue.body
             ]
         ]
 
@@ -477,8 +475,8 @@ issueListColumn model col =
         ]
 
 
-keybindInfo : List ( String, String )
-keybindInfo =
+keybindHelp : List ( String, String )
+keybindHelp =
     [ ( "/", "focus search box" )
     , ( "o", "open current issue in new window" )
     , ( "r", "refresh issue list" )
@@ -486,8 +484,8 @@ keybindInfo =
         ++ List.indexedMap (\i l -> ( String.fromInt (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) priorityLabelColumns
 
 
-searchInfo : Html Msg
-searchInfo =
+searchHelp : Html Msg
+searchHelp =
     let
         tt t =
             code [] [ text t ]
@@ -499,6 +497,25 @@ searchInfo =
             , li [] [ tt "l:", text " or ", tt "label:", text ": search by label" ]
             , li [] [ tt "-", text ": negate word" ]
             ]
+        ]
+
+
+help : Html Msg
+help =
+    div [ class "content" ]
+        [ div [ class "is-size-4" ] [ text "Keybindings" ]
+        , ul []
+            (List.map
+                (\info ->
+                    li []
+                        [ code [] [ text (Tuple.first info) ]
+                        , text (": " ++ Tuple.second info)
+                        ]
+                )
+                keybindHelp
+            )
+        , div [ class "is-size-4" ] [ text "Search" ]
+        , searchHelp
         ]
 
 
@@ -522,23 +539,7 @@ viewUnauthorized model =
                     [ textInput [ placeholder "GitHub repo (\"owner/name\")", value model.repo, onInput SetRepo ] ]
                 ]
             ]
-        , div [ class "content" ]
-            [ span [ class "is-size-4" ] [ text "Keybindings" ]
-            , ul []
-                (List.map
-                    (\info ->
-                        li []
-                            [ code [] [ text (Tuple.first info) ]
-                            , text (": " ++ Tuple.second info)
-                            ]
-                    )
-                    keybindInfo
-                )
-            ]
-        , div [ class "content" ]
-            [ span [ class "is-size-4" ] [ text "Search" ]
-            , searchInfo
-            ]
+        , help
         ]
 
 
@@ -586,7 +587,10 @@ view model =
                         , div
                             [ class "columns is-gapless" ]
                             (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
-                        , Maybe.withDefault (span [] []) (Maybe.map viewIssueFull model.issue)
+                        , div [ class "columns is-centered", style "margin" "0" ]
+                            [ div [ class "column is-10" ]
+                                [ Maybe.withDefault help (Maybe.map viewIssueFull model.issue) ]
+                            ]
                         ]
                     ]
     in
