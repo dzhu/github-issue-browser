@@ -431,7 +431,7 @@ issueListColumn model col =
                 |> List.map text
                 |> List.intersperse (text " / ")
     in
-    div [ class "column is-one-third" ]
+    div [ class "column" ]
         [ div [ class "has-text-centered has-text-weight-bold" ]
             (columnLabels ++ [ text <| " (" ++ String.fromInt (List.length issues) ++ ")" ])
         , div
@@ -563,24 +563,22 @@ view model =
 
                 _ ->
                     [ div []
-                        [ form []
-                            [ div [ class "field is-grouped" ]
-                                [ div [ class "control" ]
-                                    [ button [ class "button", onClick LogOut ] [ text "log out" ]
+                        [ div [ class "field is-grouped" ]
+                            [ div [ class "control" ]
+                                [ button [ class "button", onClick LogOut ] [ text "log out" ]
+                                ]
+                            , div
+                                [ classList
+                                    [ ( "control", True )
+                                    , ( "is-expanded", True )
+                                    , ( "is-loading", model.loading )
                                     ]
-                                , div
-                                    [ classList
-                                        [ ( "control", True )
-                                        , ( "is-expanded", True )
-                                        , ( "is-loading", model.loading )
-                                        ]
-                                    ]
-                                    [ textInput
-                                        [ id "search-input"
-                                        , placeholder "Search..."
-                                        , type_ "text"
-                                        , onInput SearchChanged
-                                        ]
+                                ]
+                                [ textInput
+                                    [ id "search-input"
+                                    , placeholder "Search..."
+                                    , type_ "text"
+                                    , onInput SearchChanged
                                     ]
                                 ]
                             ]
