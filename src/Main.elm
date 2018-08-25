@@ -43,6 +43,8 @@ textInput attributes =
         ([ class "input"
          , type_ "text"
          , stopPropagationOn "keydown" (D.succeed ( NoOp, True ))
+         , onBlur (InputFocused False)
+         , onFocus (InputFocused True)
          ]
             ++ attributes
         )
@@ -103,6 +105,7 @@ init =
             , location = { column = -1, row = -1 }
             , issue = Nothing
             , loading = False
+            , inputIsFocused = False
             }
     in
     ( model
@@ -221,6 +224,9 @@ update msg model =
             in
             ( model, Cmd.none )
 
+        InputFocused f ->
+            ( { model | inputIsFocused = f }, Cmd.none )
+
         SetPendingToken s ->
             ( { model | pendingToken = s }, Cmd.none )
 
@@ -244,7 +250,9 @@ update msg model =
 
         GlobalKeyUp k ->
             update
-                (if k == 191 then
+                (if model.inputIsFocused then
+                    NoOp
+                 else if k == 191 then
                     -- '/' -> focus search
                     DoFocus "search-input"
                  else if k == 79 then

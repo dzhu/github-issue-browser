@@ -23,6 +23,7 @@ type Msg
     | GotStorageValue ( String, Maybe String )
     | DoFocus String
     | FocusDone String (Result Browser.Dom.Error ())
+    | InputFocused Bool
     | DoChangeLabels Issue (List String)
     | LabelsChanged Issue (List Label)
     | DoOpenIssueWindow Issue
@@ -65,6 +66,7 @@ type alias Model =
     , repo : String
     , issues : Dict Int Issue
     , loading : Bool
+    , inputIsFocused : Bool
 
     -- The currently displayed issue and the location of the highlighted
     , issue : Maybe Issue
