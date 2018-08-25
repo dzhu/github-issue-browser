@@ -16,6 +16,7 @@ import Json.Encode as E
 import Model exposing (..)
 import Platform.Sub
 import Ports
+import Search exposing (..)
 import Set exposing (Set)
 import Task
 
@@ -327,15 +328,8 @@ findColumnIndex issue =
 
 issueMatch : String -> Int -> Issue -> Bool
 issueMatch str col issue =
-    let
-        targetCol =
-            findColumnIndex issue
-
-        strings =
-            [ issue.title, issue.body, "#" ++ String.fromInt issue.number ] ++ List.map .name issue.labels
-    in
-    (col == targetCol)
-        && List.any (String.contains (String.toLower str)) (List.map String.toLower strings)
+    (col == findColumnIndex issue)
+        && Search.match (Search.parse str) issue
 
 
 viewIssue : Issue -> Html Msg
@@ -485,11 +479,27 @@ issueListColumn model col =
 
 keybindInfo : List ( String, String )
 keybindInfo =
-    [ ( "/", "focus search box (search is very basic: case-insensitive substring search within labels, titles and bodies)" )
+    [ ( "/", "focus search box" )
     , ( "o", "open current issue in new window" )
     , ( "r", "refresh issue list" )
     ]
         ++ List.indexedMap (\i l -> ( String.fromInt (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) priorityLabelColumns
+
+
+searchInfo : Html Msg
+searchInfo =
+    let
+        tt t =
+            code [] [ text t ]
+    in
+    div []
+        [ p [] [ text "search text is split by spaces (no quoting yet); words are searched for in title, body, and label names" ]
+        , ul []
+            [ li [] [ tt "a:", text " or ", tt "assignee:", text ": search by assignee login name" ]
+            , li [] [ tt "l:", text " or ", tt "label:", text ": search by label" ]
+            , li [] [ tt "-", text ": negate word" ]
+            ]
+        ]
 
 
 viewUnauthorized : Model -> Html Msg
@@ -524,6 +534,10 @@ viewUnauthorized model =
                     )
                     keybindInfo
                 )
+            ]
+        , div [ class "content" ]
+            [ span [ class "is-size-4" ] [ text "Search" ]
+            , searchInfo
             ]
         ]
 
