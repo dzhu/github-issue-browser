@@ -1,16 +1,17 @@
 module Main exposing (..)
 
+import Browser
+import Browser.Dom
+import Browser.Events
 import Dict exposing (Dict)
-import Dom
 import GitHub exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (class, classList, disabled, href, id, multiple, placeholder, selected, size, style, tabindex, target, type_, value)
-import Html.Events exposing (keyCode, onBlur, onClick, onFocus, onInput, onSubmit, onWithOptions)
+import Html.Events exposing (keyCode, onBlur, onClick, onFocus, onInput, onSubmit, stopPropagationOn)
 import HtmlUtils exposing (..)
-import Json.Decode as D exposing (Decoder, float, int, list, nullable, string)
-import Json.Decode.Pipeline exposing (decode, hardcoded, optional, required)
+import Json.Decode as D exposing (Decoder, float, int, list, nullable, string, succeed)
+import Json.Decode.Pipeline exposing (hardcoded, optional, required)
 import Json.Encode as E
-import Keyboard
 import Model exposing (..)
 import Platform.Sub
 import Ports
@@ -40,7 +41,7 @@ textInput attributes =
     input
         ([ class "input"
          , type_ "text"
-         , onWithOptions "keydown" { stopPropagation = True, preventDefault = False } (D.succeed NoOp)
+         , stopPropagationOn "keydown" (D.succeed ( NoOp, True ))
          ]
             ++ attributes
         )
@@ -64,21 +65,21 @@ getIssues token url =
 
 decodeUser : Decoder User
 decodeUser =
-    decode User
+    succeed User
         |> required "login" string
         |> required "html_url" string
 
 
 decodeLabel : Decoder Label
 decodeLabel =
-    decode Label
+    succeed Label
         |> required "name" string
         |> required "color" string
 
 
 decodeIssue : Decoder Issue
 decodeIssue =
-    decode Issue
+    succeed Issue
         |> required "number" int
         |> required "title" string
         |> required "body" string
@@ -86,7 +87,7 @@ decodeIssue =
         |> required "html_url" string
         |> required "assignees" (list decodeUser)
         |> required "user" decodeUser
-        |> optional "pull_request" (decode True) False
+        |> optional "pull_request" (succeed True) False
 
 
 init : ( Model, Cmd Msg )
@@ -111,7 +112,7 @@ init =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ Keyboard.downs GlobalKeyUp
+        [ Browser.Events.onKeyUp (D.field "keyCode" D.int |> D.map GlobalKeyUp)
         , Ports.recv GotStorageValue
         ]
 
@@ -120,10 +121,6 @@ updateWithResponse : ResponseMsg -> Model -> ( Model, Cmd Msg )
 updateWithResponse resp model =
     case resp of
         GotIssues (Err err) ->
-            let
-                _ =
-                    Debug.log "Error in getting issues" err
-            in
             ( model, Cmd.none )
 
         GotIssues (Ok ( maybeNext, newIssues )) ->
@@ -147,7 +144,7 @@ update msg model =
 
         GotStorageValue ( key, value ) ->
             let
-                msg =
+                msg2 =
                     case key of
                         "token" ->
                             SetToken value
@@ -158,7 +155,7 @@ update msg model =
                         _ ->
                             NoOp
             in
-            update msg model
+            update msg2 model
 
         LogOut ->
             let
@@ -171,23 +168,23 @@ update msg model =
             ( model, Ports.windowOpen issue.html_url )
 
         DoFocus id ->
-            ( model, Task.attempt (FocusDone id) (Dom.focus id) )
+            ( model, Task.attempt (FocusDone id) (Browser.Dom.focus id) )
 
         DoChangeLabels issue labels ->
             let
                 body =
-                    E.list (List.map E.string labels)
+                    E.list E.string labels
 
                 url =
-                    baseUrl model ++ "issues/" ++ toString issue.number ++ "/labels"
+                    baseUrl model ++ "issues/" ++ String.fromInt issue.number ++ "/labels"
 
                 procResult result =
                     case result of
                         Err err ->
                             NoOp
 
-                        Ok ( _, labels ) ->
-                            LabelsChanged issue labels
+                        Ok ( _, labels2 ) ->
+                            LabelsChanged issue labels2
             in
             ( model
             , ghPut body model.token procResult (list decodeLabel) url
@@ -199,11 +196,11 @@ update msg model =
                     issue.number
 
                 updateIssue =
-                    \issue ->
-                        if issue.number == num then
-                            { issue | labels = labels }
+                    \issue2 ->
+                        if issue2.number == num then
+                            { issue2 | labels = labels }
                         else
-                            issue
+                            issue2
 
                 issues =
                     model.issues
@@ -216,10 +213,6 @@ update msg model =
                 _ =
                     case result of
                         Err err ->
-                            let
-                                _ =
-                                    Debug.log "Error in focusing" ( id, err )
-                            in
                             ()
 
                         _ ->
@@ -267,18 +260,17 @@ update msg model =
                         ind =
                             k - 49
 
-                        label =
+                        maybeLabel =
                             List.drop ind priorityLabelColumns |> List.head |> Maybe.map Tuple.first
                     in
-                    case ( label, model.issue ) of
+                    case ( maybeLabel, model.issue ) of
                         ( Just label, Just issue ) ->
                             let
                                 origLabels =
                                     List.map .name issue.labels |> Set.fromList
 
                                 labels =
-                                    origLabels
-                                        |> flip Set.diff priorityLabels
+                                    Set.diff origLabels priorityLabels
                                         |> Set.insert label
                                         |> Set.toList
                             in
@@ -287,6 +279,7 @@ update msg model =
                         _ ->
                             NoOp
                  else if k == 82 then
+                    -- 'r' -> refresh issue list
                     SetToken model.token
                  else
                     NoOp
@@ -330,7 +323,7 @@ issueMatch str col issue =
             findColumnIndex issue
 
         strings =
-            [ issue.title, issue.body, "#" ++ toString issue.number ] ++ List.map .name issue.labels
+            [ issue.title, issue.body, "#" ++ String.fromInt issue.number ] ++ List.map .name issue.labels
     in
     (col == targetCol)
         && List.any (String.contains (String.toLower str)) (List.map String.toLower strings)
@@ -340,7 +333,7 @@ viewIssue : Issue -> Html Msg
 viewIssue issue =
     text
         ("#"
-            ++ toString issue.number
+            ++ String.fromInt issue.number
             ++ (if issue.isPR then
                     "-PR"
                 else
@@ -353,20 +346,20 @@ viewIssue issue =
 
 viewIssueFull : Issue -> Html Msg
 viewIssueFull issue =
-    div [ class "columns is-centered", style [ ( "margin", "0" ) ] ]
+    div [ class "columns is-centered", style "margin" "0" ]
         [ div [ class "column is-10" ]
             [ -- Title.
               span [ class "is-size-3" ]
                 [ a [ href issue.html_url, target "_blank" ] [ text issue.title ]
                 , text " "
-                , span [ class "has-text-grey" ] [ text ("#" ++ toString issue.number) ]
+                , span [ class "has-text-grey" ] [ text ("#" ++ String.fromInt issue.number) ]
                 ]
 
             -- User info (opener and assignees).
             , div []
                 ([ text "by: " ]
                     ++ [ text issue.user.login ]
-                    ++ [ span [ class "has-text-grey", style [ ( "margin", "0 .5em" ) ] ] [ text "|" ] ]
+                    ++ [ span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ] ]
                     ++ [ text "assigned to: " ]
                     ++ (if List.isEmpty issue.assignees then
                             [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
@@ -377,7 +370,7 @@ viewIssueFull issue =
                 )
 
             -- Label list.
-            , div [ style [ ( "margin", ".6em 0" ) ] ]
+            , div [ style "margin" ".6em 0" ]
                 (List.intersperse (text " ")
                     (issue.labels
                         |> List.map
@@ -391,9 +384,7 @@ viewIssueFull issue =
                                                     "has-text-black"
                                                )
                                         )
-                                    , style
-                                        [ ( "background-color", "#" ++ l.color )
-                                        ]
+                                    , style "background-color" ("#" ++ l.color)
                                     ]
                                     [ text l.name ]
                             )
@@ -441,7 +432,7 @@ issueListColumn model col =
     in
     div [ class "column is-one-third" ]
         [ div [ class "has-text-centered has-text-weight-bold" ]
-            (columnLabels ++ [ text <| " (" ++ toString (List.length issues) ++ ")" ])
+            (columnLabels ++ [ text <| " (" ++ String.fromInt (List.length issues) ++ ")" ])
         , div
             [ classList
                 [ ( "select", True )
@@ -449,17 +440,15 @@ issueListColumn model col =
                 , ( "is-flex", True )
                 , ( "is-loading", model.loading )
                 ]
-            , style [ ( "width", "100%" ) ]
+            , style "width" "100%"
             ]
             [ select
                 [ -- Force it to fill the column and match heights with all
                   -- other selects.
-                  style
-                    [ ( "height", "initial" )
-                    , ( "padding", "0" )
-                    , ( "width", "100%" )
-                    , ( "background-color", "initial" )
-                    ]
+                  style "height" "initial"
+                , style "padding" "0"
+                , style "width" "100%"
+                , style "background-color" "initial"
                 , disabled (List.isEmpty issues)
                 , onChange
                     (\ind ->
@@ -491,7 +480,7 @@ keybindInfo =
     , ( "o", "open current issue in new window" )
     , ( "r", "refresh issue list" )
     ]
-        ++ List.indexedMap (\i l -> ( toString (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) priorityLabelColumns
+        ++ List.indexedMap (\i l -> ( String.fromInt (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) priorityLabelColumns
 
 
 viewUnauthorized : Model -> Html Msg
@@ -530,42 +519,57 @@ viewUnauthorized model =
         ]
 
 
-view : Model -> Html Msg
+view : Model -> Browser.Document Msg
 view model =
-    case model.token of
-        Nothing ->
-            viewUnauthorized model
+    let
+        title =
+            "GitHub issue browser"
+                ++ (case model.issue of
+                        Just issue ->
+                            ": #" ++ String.fromInt issue.number ++ " " ++ issue.title
 
-        _ ->
-            div []
-                [ form []
-                    [ div [ class "field is-grouped" ]
-                        [ div [ class "control" ]
-                            [ button [ class "button", onClick LogOut ] [ text "log out" ]
+                        Nothing ->
+                            ""
+                   )
+
+        body =
+            case model.token of
+                Nothing ->
+                    [ viewUnauthorized model ]
+
+                _ ->
+                    [ div []
+                        [ form []
+                            [ div [ class "field is-grouped" ]
+                                [ div [ class "control" ]
+                                    [ button [ class "button", onClick LogOut ] [ text "log out" ]
+                                    ]
+                                , div
+                                    [ classList
+                                        [ ( "control", True )
+                                        , ( "is-expanded", True )
+                                        , ( "is-loading", model.loading )
+                                        ]
+                                    ]
+                                    [ textInput
+                                        [ id "search-input"
+                                        , placeholder "Search..."
+                                        , type_ "text"
+                                        , onInput SearchChanged
+                                        ]
+                                    ]
+                                ]
                             ]
                         , div
-                            [ classList
-                                [ ( "control", True )
-                                , ( "is-expanded", True )
-                                , ( "is-loading", model.loading )
-                                ]
-                            ]
-                            [ textInput
-                                [ id "search-input"
-                                , placeholder "Search..."
-                                , type_ "text"
-                                , onInput SearchChanged
-                                ]
-                            ]
+                            [ class "columns is-gapless" ]
+                            (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
+                        , Maybe.withDefault (span [] []) (Maybe.map viewIssueFull model.issue)
                         ]
                     ]
-                , div
-                    [ class "columns is-gapless" ]
-                    (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
-                , Maybe.withDefault (span [] []) (Maybe.map viewIssueFull model.issue)
-                ]
+    in
+    { title = title, body = body }
 
 
-main : Program Never Model Msg
+main : Program {} Model Msg
 main =
-    program { init = init, view = view, update = update, subscriptions = subscriptions }
+    Browser.document { init = always init, view = view, update = update, subscriptions = subscriptions }

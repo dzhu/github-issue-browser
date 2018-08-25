@@ -35,7 +35,7 @@ hexDigitValue c =
 
 
 hexStringValue : String -> Int
-hexStringValue s =
+hexStringValue str =
     let
         hr s =
             case String.uncons s of
@@ -45,7 +45,7 @@ hexStringValue s =
                 _ ->
                     0
     in
-    hr (String.reverse s)
+    hr (String.reverse str)
 
 
 isDark : String -> Bool

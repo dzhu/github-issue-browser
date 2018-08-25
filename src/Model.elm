@@ -1,7 +1,7 @@
 module Model exposing (..)
 
+import Browser.Dom
 import Dict exposing (Dict)
-import Dom
 import Http
 
 
@@ -22,7 +22,7 @@ type Msg
       -- External things.
     | GotStorageValue ( String, Maybe String )
     | DoFocus String
-    | FocusDone String (Result Dom.Error ())
+    | FocusDone String (Result Browser.Dom.Error ())
     | DoChangeLabels Issue (List String)
     | LabelsChanged Issue (List Label)
     | DoOpenIssueWindow Issue

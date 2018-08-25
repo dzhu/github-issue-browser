@@ -1,7 +1,6 @@
 <html>
   <head>
     <meta charset="UTF-8">
-    <title>GitHub issue browser</title>
     <script type="text/javascript" src="elm.js"></script>
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.1/css/bulma.min.css">
@@ -20,7 +19,7 @@
         }
       });
 
-      let app = Elm.Main.fullscreen();
+      let app = Elm.Main.init({flags: {}});
       app.ports.set.subscribe((args) => {localStorage.setItem(args[0], args[1])});
       app.ports.get.subscribe((key) => {app.ports.recv.send([key, localStorage.getItem(key)])});
       app.ports.del.subscribe((key) => {localStorage.removeItem(key)});

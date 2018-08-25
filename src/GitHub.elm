@@ -10,12 +10,20 @@ import Regex
 parseLinksHeader : String -> Dict String String
 parseLinksHeader str =
     let
+        linkRegex =
+            Regex.fromString "<(.*)>; rel=\"(.*)\""
+
         extractLink s =
-            case List.head (Regex.find (Regex.AtMost 1) (Regex.regex "<(.*)>; rel=\"(.*)\"") s) of
-                Just match ->
-                    case match.submatches of
-                        [ Just a, Just b ] ->
-                            Just ( b, a )
+            case linkRegex of
+                Just re ->
+                    case List.head (Regex.findAtMost 1 re s) of
+                        Just match ->
+                            case match.submatches of
+                                [ Just a, Just b ] ->
+                                    Just ( b, a )
+
+                                _ ->
+                                    Nothing
 
                         _ ->
                             Nothing
@@ -64,15 +72,15 @@ ghRequest method body token tag decoder url =
                                         |> Maybe.map parseLinksHeader
                                         |> Maybe.andThen (Dict.get "next")
 
-                                body =
+                                respBody =
                                     Json.Decode.decodeString decoder resp.body
                             in
-                            case body of
+                            case respBody of
                                 Ok x ->
                                     Ok ( next, x )
 
                                 Err x ->
-                                    Err x
+                                    Err <| Json.Decode.errorToString x
                         )
                 , timeout = Nothing
                 , withCredentials = False
