@@ -8,6 +8,7 @@ import GitHub exposing (..)
 import Html exposing (..)
 import Html.Attributes exposing (class, classList, disabled, href, id, multiple, placeholder, selected, size, style, tabindex, target, type_, value)
 import Html.Events exposing (keyCode, onBlur, onClick, onFocus, onInput, onSubmit, stopPropagationOn)
+import Html.Lazy
 import HtmlUtils exposing (..)
 import Json.Decode as D exposing (Decoder, float, int, list, nullable, string, succeed)
 import Json.Decode.Pipeline exposing (hardcoded, optional, required)
@@ -396,7 +397,7 @@ viewIssueFull issue =
                 [ if String.isEmpty issue.body then
                     span [ class "has-text-grey-light is-italic" ] [ text "no body" ]
                   else
-                    toMarkdown issue.body
+                    Html.Lazy.lazy toMarkdown issue.body
                 ]
             ]
         ]
