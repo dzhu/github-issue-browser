@@ -21,6 +21,10 @@ import Set exposing (Set)
 import Task
 
 
+type alias Flags =
+    { token : Maybe String, repo : Maybe String }
+
+
 {-| Configuration: List of priority labels and the columns they should go into.
 -}
 priorityLabelColumns : List ( String, number )
@@ -94,14 +98,14 @@ decodeIssue =
         |> optional "pull_request" (succeed True) False
 
 
-init : ( Model, Cmd Msg )
-init =
+init : Flags -> ( Model, Cmd Msg )
+init flags =
     let
         model =
             { pendingToken = ""
-            , token = Nothing
+            , token = flags.token
             , search = ""
-            , repo = ""
+            , repo = Maybe.withDefault "" flags.repo
             , issues = Dict.empty
             , location = { column = -1, row = -1 }
             , issue = Nothing
@@ -165,7 +169,7 @@ update msg model =
         LogOut ->
             let
                 ( newModel, _ ) =
-                    init
+                    init { token = Nothing, repo = Nothing }
             in
             ( { newModel | repo = model.repo }, Ports.del "token" )
 
@@ -595,6 +599,6 @@ view model =
     { title = title, body = body }
 
 
-main : Program {} Model Msg
+main : Program Flags Model Msg
 main =
-    Browser.document { init = always init, view = view, update = update, subscriptions = subscriptions }
+    Browser.document { init = init, view = view, update = update, subscriptions = subscriptions }
