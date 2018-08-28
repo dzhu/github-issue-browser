@@ -3,6 +3,7 @@ module Model exposing (..)
 import Browser.Dom
 import Dict exposing (Dict)
 import Http
+import Time
 
 
 {-| Messages resulting from responses to HTTP requests.
@@ -29,6 +30,7 @@ type Msg
     | DoOpenIssueWindow Issue
     | GlobalKeyUp Int
     | Response ResponseMsg
+    | GotTimeZone Time.Zone
 
 
 type alias Label =
@@ -44,6 +46,7 @@ type alias Issue =
     , assignees : List User
     , user : User
     , isPR : Bool
+    , creation_time : Maybe Time.Posix
     }
 
 
@@ -67,6 +70,7 @@ type alias Model =
     , issues : Dict Int Issue
     , loading : Bool
     , inputIsFocused : Bool
+    , timeZone : Time.Zone
 
     -- The currently displayed issue and the location of the highlighted
     , issue : Maybe Issue

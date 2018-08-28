@@ -10,6 +10,7 @@ import Html.Attributes exposing (class, classList, disabled, href, id, multiple,
 import Html.Events exposing (keyCode, onBlur, onClick, onFocus, onInput, onSubmit, stopPropagationOn)
 import Html.Lazy
 import HtmlUtils exposing (..)
+import Iso8601
 import Json.Decode as D exposing (Decoder, float, int, list, nullable, string, succeed)
 import Json.Decode.Pipeline exposing (hardcoded, optional, required)
 import Json.Encode as E
@@ -19,6 +20,7 @@ import Ports
 import Search exposing (..)
 import Set exposing (Set)
 import Task
+import Time
 
 
 type alias Flags =
@@ -85,6 +87,20 @@ decodeLabel =
         |> required "color" string
 
 
+decodeTime : Decoder (Maybe Time.Posix)
+decodeTime =
+    string
+        |> D.map
+            (\s ->
+                case Iso8601.toTime s of
+                    Ok t ->
+                        Just t
+
+                    Err _ ->
+                        Nothing
+            )
+
+
 decodeIssue : Decoder Issue
 decodeIssue =
     succeed Issue
@@ -96,6 +112,7 @@ decodeIssue =
         |> required "assignees" (list decodeUser)
         |> required "user" decodeUser
         |> optional "pull_request" (succeed True) False
+        |> required "created_at" decodeTime
 
 
 init : Flags -> ( Model, Cmd Msg )
@@ -111,10 +128,13 @@ init flags =
             , issue = Nothing
             , loading = False
             , inputIsFocused = False
+            , timeZone = Time.utc
             }
     in
     ( model
-    , Cmd.batch [ Ports.get "token", Ports.get "repo" ]
+      -- TODO weirdly, leaving out the `get` prevents 'o'-to-open from working
+      -- later, but I don't see why that should be.
+    , Cmd.batch [ Ports.get "token", Task.perform GotTimeZone Time.here ]
     )
 
 
@@ -306,6 +326,9 @@ update msg model =
         IssueSelected sel issue ->
             ( { model | location = sel, issue = Just issue }, Cmd.none )
 
+        GotTimeZone zone ->
+            ( { model | timeZone = zone }, Cmd.none )
+
         Response resp ->
             updateWithResponse resp model
 
@@ -351,8 +374,68 @@ viewIssue issue =
         )
 
 
-viewIssueFull : Issue -> Html Msg
-viewIssueFull issue =
+formatTime : Time.Zone -> Time.Posix -> String
+formatTime zone time =
+    let
+        pad n =
+            (if n < 10 then
+                "0"
+             else
+                ""
+            )
+                ++ String.fromInt n
+
+        a f =
+            f zone time
+
+        p =
+            a >> pad
+
+        m =
+            (case a Time.toMonth of
+                Time.Jan ->
+                    1
+
+                Time.Feb ->
+                    2
+
+                Time.Mar ->
+                    3
+
+                Time.Apr ->
+                    4
+
+                Time.May ->
+                    5
+
+                Time.Jun ->
+                    6
+
+                Time.Jul ->
+                    7
+
+                Time.Aug ->
+                    8
+
+                Time.Sep ->
+                    9
+
+                Time.Oct ->
+                    10
+
+                Time.Nov ->
+                    11
+
+                Time.Dec ->
+                    12
+            )
+                |> pad
+    in
+    String.fromInt (a Time.toYear) ++ "-" ++ m ++ "-" ++ p Time.toDay ++ " " ++ p Time.toHour ++ ":" ++ p Time.toMinute ++ ":" ++ p Time.toSecond
+
+
+viewIssueFull : Time.Zone -> Issue -> Html Msg
+viewIssueFull zone issue =
     span []
         [ -- Title.
           span [ class "is-size-3" ]
@@ -363,10 +446,14 @@ viewIssueFull issue =
 
         -- User info (opener and assignees).
         , div []
-            ([ text "by: " ]
-                ++ [ text issue.user.login ]
-                ++ [ span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ] ]
-                ++ [ text "assigned to: " ]
+            ([ text "created: "
+             , text (Maybe.withDefault "unknown" (Maybe.map (formatTime zone) issue.creation_time))
+             , span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
+             , text "by: "
+             , text issue.user.login
+             , span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
+             , text "assigned to: "
+             ]
                 ++ (if List.isEmpty issue.assignees then
                         [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
                     else
@@ -591,7 +678,7 @@ view model =
                             (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
                         , div [ class "columns is-centered", style "margin" "0" ]
                             [ div [ class "column is-10" ]
-                                [ Maybe.withDefault help (Maybe.map viewIssueFull model.issue) ]
+                                [ Maybe.withDefault help (Maybe.map (viewIssueFull model.timeZone) model.issue) ]
                             ]
                         ]
                     ]
