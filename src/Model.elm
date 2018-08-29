@@ -25,7 +25,9 @@ type Msg
     | DoFocus String
     | FocusDone String (Result Browser.Dom.Error ())
     | InputFocused Bool
-    | DoChangeLabels Issue (List String)
+    | ConfirmChangeLabels Issue (List String)
+    | DoChangeLabels
+    | CancelChangeLabels
     | LabelsChanged Issue (List Label)
     | DoOpenIssueWindow Issue
     | GlobalKeyUp Int
@@ -71,6 +73,7 @@ type alias Model =
     , loading : Bool
     , inputIsFocused : Bool
     , timeZone : Time.Zone
+    , labelsChangeToConfirm : Maybe { issue : Issue, labels : List String }
 
     -- The currently displayed issue and the location of the highlighted
     , issue : Maybe Issue

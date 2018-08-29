@@ -129,6 +129,7 @@ init flags =
             , loading = False
             , inputIsFocused = False
             , timeZone = Time.utc
+            , labelsChangeToConfirm = Nothing
             }
     in
     ( model
@@ -199,25 +200,36 @@ update msg model =
         DoFocus id ->
             ( model, Task.attempt (FocusDone id) (Browser.Dom.focus id) )
 
-        DoChangeLabels issue labels ->
-            let
-                body =
-                    E.list E.string labels
+        ConfirmChangeLabels issue labels ->
+            ( { model | labelsChangeToConfirm = Just { issue = issue, labels = labels } }, Cmd.none )
 
-                url =
-                    baseUrl model ++ "issues/" ++ String.fromInt issue.number ++ "/labels"
+        CancelChangeLabels ->
+            ( { model | labelsChangeToConfirm = Nothing }, Cmd.none )
 
-                procResult result =
-                    case result of
-                        Err err ->
-                            NoOp
+        DoChangeLabels ->
+            case model.labelsChangeToConfirm of
+                Just { issue, labels } ->
+                    let
+                        body =
+                            E.list E.string labels
 
-                        Ok ( _, labels2 ) ->
-                            LabelsChanged issue labels2
-            in
-            ( model
-            , ghPut body model.token procResult (list decodeLabel) url
-            )
+                        url =
+                            baseUrl model ++ "issues/" ++ String.fromInt issue.number ++ "/labels"
+
+                        procResult result =
+                            case result of
+                                Err err ->
+                                    NoOp
+
+                                Ok ( _, labels2 ) ->
+                                    LabelsChanged issue labels2
+                    in
+                    ( { model | labelsChangeToConfirm = Nothing }
+                    , ghPut body model.token procResult (list decodeLabel) url
+                    )
+
+                Nothing ->
+                    ( model, Cmd.none )
 
         LabelsChanged issue labels ->
             let
@@ -275,48 +287,56 @@ update msg model =
 
         GlobalKeyUp k ->
             update
-                (if model.inputIsFocused then
-                    NoOp
-                 else if k == 191 then
-                    -- '/' -> focus search
-                    DoFocus "search-input"
-                 else if k == 79 then
-                    -- 'o' -> open issue
-                    case model.issue of
-                        Just i ->
-                            DoOpenIssueWindow i
+                (case model.labelsChangeToConfirm of
+                    Just { issue, labels } ->
+                        if k == 13 then
+                            DoChangeLabels
+                        else
+                            CancelChangeLabels
 
-                        _ ->
+                    _ ->
+                        if model.inputIsFocused then
                             NoOp
-                 else if 49 <= k && k < 58 then
-                    -- digit -> assign label
-                    let
-                        ind =
-                            k - 49
+                        else if k == 191 then
+                            -- '/' -> focus search
+                            DoFocus "search-input"
+                        else if k == 79 then
+                            -- 'o' -> open issue
+                            case model.issue of
+                                Just i ->
+                                    DoOpenIssueWindow i
 
-                        maybeLabel =
-                            List.drop ind priorityLabelColumns |> List.head |> Maybe.map Tuple.first
-                    in
-                    case ( maybeLabel, model.issue ) of
-                        ( Just label, Just issue ) ->
+                                _ ->
+                                    NoOp
+                        else if 49 <= k && k < 58 then
+                            -- digit -> assign label
                             let
-                                origLabels =
-                                    List.map .name issue.labels |> Set.fromList
+                                ind =
+                                    k - 49
 
-                                labels =
-                                    Set.diff origLabels priorityLabels
-                                        |> Set.insert label
-                                        |> Set.toList
+                                maybeLabel =
+                                    List.drop ind priorityLabelColumns |> List.head |> Maybe.map Tuple.first
                             in
-                            DoChangeLabels issue labels
+                            case ( maybeLabel, model.issue ) of
+                                ( Just label, Just issue ) ->
+                                    let
+                                        origLabels =
+                                            List.map .name issue.labels |> Set.fromList
 
-                        _ ->
+                                        labels =
+                                            Set.diff origLabels priorityLabels
+                                                |> Set.insert label
+                                                |> Set.toList
+                                    in
+                                    ConfirmChangeLabels issue labels
+
+                                _ ->
+                                    NoOp
+                        else if k == 82 then
+                            -- 'r' -> refresh issue list
+                            SetToken model.token
+                        else
                             NoOp
-                 else if k == 82 then
-                    -- 'r' -> refresh issue list
-                    SetToken model.token
-                 else
-                    NoOp
                 )
                 model
 
@@ -647,13 +667,40 @@ view model =
                             ""
                    )
 
+        confirmModal =
+            case model.labelsChangeToConfirm of
+                Just _ ->
+                    div
+                        [ style "position" "absolute"
+                        , style "left" "0"
+                        , style "right" "0"
+                        , style "top" "0"
+                        , style "bottom" "0"
+                        , style "background-color" "#00000050"
+                        , style "z-index" "1"
+                        ]
+                        [ div
+                            [ class "has-text-danger is-size-3"
+                            , style "position" "relative"
+                            , style "float" "left"
+                            , style "top" "50%"
+                            , style "left" "50%"
+                            , style "transform" "translate(-50%,-50%)"
+                            ]
+                            [ text "press enter to confirm" ]
+                        ]
+
+                Nothing ->
+                    text ""
+
         body =
             case model.token of
                 Nothing ->
                     [ viewUnauthorized model ]
 
                 _ ->
-                    [ div []
+                    [ confirmModal
+                    , div []
                         [ div [ class "field is-grouped" ]
                             [ div [ class "control" ]
                                 [ button [ class "button", onClick LogOut ] [ text "log out" ]
