@@ -454,6 +454,24 @@ formatTime zone time =
     String.fromInt (a Time.toYear) ++ "-" ++ m ++ "-" ++ p Time.toDay ++ " " ++ p Time.toHour ++ ":" ++ p Time.toMinute ++ ":" ++ p Time.toSecond
 
 
+commentCard : String -> Time.Zone -> Time.Posix -> List (Html Msg) -> Html Msg
+commentCard user zone time body =
+    div [ class "card" ]
+        [ header [ class "card-header" ]
+            [ p [ class "card-header-title" ]
+                [ text user
+                , span [ class "has-text-weight-normal" ]
+                    [ text " at "
+                    , text (formatTime zone time)
+                    ]
+                ]
+            ]
+        , div [ class "card-content" ]
+            [ div [ class "content" ] body
+            ]
+        ]
+
+
 viewIssueFull : Time.Zone -> Issue -> Html Msg
 viewIssueFull zone issue =
     span []
@@ -464,26 +482,8 @@ viewIssueFull zone issue =
             , span [ class "has-text-grey" ] [ text ("#" ++ String.fromInt issue.number) ]
             ]
 
-        -- User info (opener and assignees).
-        , div []
-            ([ text "created: "
-             , text (Maybe.withDefault "unknown" (Maybe.map (formatTime zone) issue.creation_time))
-             , span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
-             , text "by: "
-             , text issue.user.login
-             , span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
-             , text "assigned to: "
-             ]
-                ++ (if List.isEmpty issue.assignees then
-                        [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
-                    else
-                        List.intersperse (text ", ")
-                            (List.map (\user -> text user.login) issue.assignees)
-                   )
-            )
-
-        -- Label list.
-        , div [ style "margin" ".6em 0" ]
+        -- Labels and assignee.
+        , div [ style "margin" "0 0 0.6em 0" ]
             (List.intersperse (text " ")
                 (issue.labels
                     |> List.map
@@ -502,10 +502,21 @@ viewIssueFull zone issue =
                                 [ text l.name ]
                         )
                 )
+                ++ [ span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
+                   , text "assigned to: "
+                   ]
+                ++ (if List.isEmpty issue.assignees then
+                        [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
+                    else
+                        List.intersperse (text ", ")
+                            (List.map (\user -> text user.login) issue.assignees)
+                   )
             )
 
         -- Issue body.
-        , div [ class "content" ]
+        , commentCard issue.user.login
+            zone
+            (Maybe.withDefault (Time.millisToPosix 0) issue.creation_time)
             [ if String.isEmpty issue.body then
                 span [ class "has-text-grey-light is-italic" ] [ text "no body" ]
               else
