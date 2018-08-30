@@ -6,10 +6,12 @@ import Http
 import Time
 
 
-{-| Messages resulting from responses to HTTP requests.
+{-| Messages resulting from responses to HTTP requests. The tuple value contains
+a `next` link, if any, and the request payload.
 -}
 type ResponseMsg
     = GotIssues (Result Http.Error ( Maybe String, List Issue ))
+    | GotComments Issue (Result Http.Error ( Maybe String, List Comment ))
 
 
 type Msg
@@ -29,6 +31,7 @@ type Msg
     | DoChangeLabels
     | CancelChangeLabels
     | LabelsChanged Issue (List Label)
+    | DoGetComments Issue
     | DoOpenIssueWindow Issue
     | GlobalKeyUp Int
     | Response ResponseMsg
@@ -36,7 +39,23 @@ type Msg
 
 
 type alias Label =
-    { name : String, color : String }
+    { name : String
+    , color : String
+    }
+
+
+type alias User =
+    { login : String
+    , html_url : String
+    }
+
+
+type alias Comment =
+    { id : Int
+    , creation_time : Maybe Time.Posix
+    , user : User
+    , body : String
+    }
 
 
 type alias Issue =
@@ -49,12 +68,7 @@ type alias Issue =
     , user : User
     , isPR : Bool
     , creation_time : Maybe Time.Posix
-    }
-
-
-type alias User =
-    { login : String
-    , html_url : String
+    , comments : Dict Int Comment
     }
 
 
@@ -71,6 +85,7 @@ type alias Model =
     , repo : String
     , issues : Dict Int Issue
     , loading : Bool
+    , loadingComments : Bool
     , inputIsFocused : Bool
     , timeZone : Time.Zone
     , labelsChangeToConfirm : Maybe { issue : Issue, labels : List String }

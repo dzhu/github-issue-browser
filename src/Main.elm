@@ -17,6 +17,7 @@ import Json.Encode as E
 import Model exposing (..)
 import Platform.Sub
 import Ports
+import Process
 import Search exposing (..)
 import Set exposing (Set)
 import Task
@@ -73,6 +74,11 @@ getIssues token url =
     ghGet token (GotIssues >> Response) (list decodeIssue) url
 
 
+getComments : Maybe String -> Issue -> String -> Cmd Msg
+getComments token issue url =
+    ghGet token (GotComments issue >> Response) (list decodeComment) url
+
+
 decodeUser : Decoder User
 decodeUser =
     succeed User
@@ -90,15 +96,16 @@ decodeLabel =
 decodeTime : Decoder (Maybe Time.Posix)
 decodeTime =
     string
-        |> D.map
-            (\s ->
-                case Iso8601.toTime s of
-                    Ok t ->
-                        Just t
+        |> D.map (Iso8601.toTime >> Result.toMaybe)
 
-                    Err _ ->
-                        Nothing
-            )
+
+decodeComment : Decoder Comment
+decodeComment =
+    succeed Comment
+        |> required "id" int
+        |> required "created_at" decodeTime
+        |> required "user" decodeUser
+        |> required "body" string
 
 
 decodeIssue : Decoder Issue
@@ -113,6 +120,7 @@ decodeIssue =
         |> required "user" decodeUser
         |> optional "pull_request" (succeed True) False
         |> required "created_at" decodeTime
+        |> hardcoded Dict.empty
 
 
 init : Flags -> ( Model, Cmd Msg )
@@ -127,6 +135,7 @@ init flags =
             , location = { column = -1, row = -1 }
             , issue = Nothing
             , loading = False
+            , loadingComments = False
             , inputIsFocused = False
             , timeZone = Time.utc
             , labelsChangeToConfirm = Nothing
@@ -163,7 +172,41 @@ updateWithResponse resp model =
                         _ ->
                             ( False, Cmd.none )
             in
-            ( { model | issues = Dict.union (newIssues |> List.map (\issue -> ( issue.number, issue )) |> Dict.fromList) model.issues, loading = loading }, newCmd )
+            ( { model
+                | issues = Dict.union (newIssues |> List.map (\issue -> ( issue.number, issue )) |> Dict.fromList) model.issues
+                , loading = loading
+              }
+            , newCmd
+            )
+
+        GotComments _ (Err err) ->
+            ( model, Cmd.none )
+
+        GotComments issue (Ok ( maybeNext, newComments )) ->
+            let
+                ( loadingComments, newCmd ) =
+                    case maybeNext of
+                        Just next ->
+                            ( True, getComments model.token issue next )
+
+                        _ ->
+                            ( False, Cmd.none )
+
+                updateIssue : Int -> Issue -> Issue
+                updateIssue =
+                    \_ issue2 ->
+                        if issue.number == issue2.number then
+                            { issue2 | comments = Dict.union (newComments |> List.map (\comment -> ( comment.id, comment )) |> Dict.fromList) issue2.comments }
+                        else
+                            issue2
+            in
+            ( { model
+                | issues = Dict.map updateIssue model.issues
+                , issue = Maybe.map (updateIssue 0) model.issue
+                , loadingComments = loadingComments
+              }
+            , newCmd
+            )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -344,10 +387,20 @@ update msg model =
             ( { model | search = s, issue = Nothing, location = { column = -1, row = -1 } }, Cmd.none )
 
         IssueSelected sel issue ->
-            ( { model | location = sel, issue = Just issue }, Cmd.none )
+            ( { model | location = sel, issue = Just issue }
+            , Process.sleep 750 |> Task.perform (always (DoGetComments issue))
+            )
 
         GotTimeZone zone ->
             ( { model | timeZone = zone }, Cmd.none )
+
+        DoGetComments issue ->
+            if Just issue.number == Maybe.map .number model.issue then
+                ( { model | loadingComments = True }
+                , getComments model.token issue (baseUrl model ++ "issues/" ++ String.fromInt issue.number ++ "/comments")
+                )
+            else
+                ( model, Cmd.none )
 
         Response resp ->
             updateWithResponse resp model
@@ -454,12 +507,12 @@ formatTime zone time =
     String.fromInt (a Time.toYear) ++ "-" ++ m ++ "-" ++ p Time.toDay ++ " " ++ p Time.toHour ++ ":" ++ p Time.toMinute ++ ":" ++ p Time.toSecond
 
 
-commentCard : String -> Time.Zone -> Time.Posix -> List (Html Msg) -> Html Msg
-commentCard user zone time body =
+commentCard : User -> Time.Zone -> Time.Posix -> String -> Html Msg
+commentCard user zone time markdownBody =
     div [ class "card" ]
         [ header [ class "card-header" ]
             [ p [ class "card-header-title" ]
-                [ text user
+                [ text user.login
                 , span [ class "has-text-weight-normal" ]
                     [ text " at "
                     , text (formatTime zone time)
@@ -467,14 +520,19 @@ commentCard user zone time body =
                 ]
             ]
         , div [ class "card-content" ]
-            [ div [ class "content" ] body
+            [ div [ class "content" ]
+                [ if String.isEmpty markdownBody then
+                    span [ class "has-text-grey-light is-italic" ] [ text "no body" ]
+                  else
+                    Html.Lazy.lazy toMarkdown markdownBody
+                ]
             ]
         ]
 
 
 viewIssueFull : Time.Zone -> Issue -> Html Msg
 viewIssueFull zone issue =
-    span []
+    span [] <|
         [ -- Title.
           span [ class "is-size-3" ]
             [ a [ href issue.html_url, target "_blank" ] [ text issue.title ]
@@ -502,7 +560,10 @@ viewIssueFull zone issue =
                                 [ text l.name ]
                         )
                 )
-                ++ [ span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
+                ++ [ if List.isEmpty issue.labels then
+                        text ""
+                     else
+                        span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
                    , text "assigned to: "
                    ]
                 ++ (if List.isEmpty issue.assignees then
@@ -514,15 +575,20 @@ viewIssueFull zone issue =
             )
 
         -- Issue body.
-        , commentCard issue.user.login
+        , commentCard issue.user
             zone
             (Maybe.withDefault (Time.millisToPosix 0) issue.creation_time)
-            [ if String.isEmpty issue.body then
-                span [ class "has-text-grey-light is-italic" ] [ text "no body" ]
-              else
-                Html.Lazy.lazy toMarkdown issue.body
-            ]
+            issue.body
         ]
+            ++ (Dict.values issue.comments
+                    |> List.map
+                        (\comment ->
+                            commentCard comment.user
+                                zone
+                                (Maybe.withDefault (Time.millisToPosix 0) comment.creation_time)
+                                comment.body
+                        )
+               )
 
 
 issueListColumn : Model -> Int -> Html Msg
@@ -732,12 +798,17 @@ view model =
                                 ]
                             ]
                         , div
-                            [ class "columns is-gapless" ]
+                            [ class "columns is-gapless", style "margin-bottom" "0" ]
                             (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
                         , div [ class "columns is-centered", style "margin" "0" ]
                             [ div [ class "column is-10" ]
                                 [ Maybe.withDefault help (Maybe.map (viewIssueFull model.timeZone) model.issue) ]
                             ]
+                        , if model.loadingComments then
+                            div [ class "has-text-centered" ]
+                                [ div [ class "icon loader is-large" ] [] ]
+                          else
+                            text ""
                         ]
                     ]
     in
