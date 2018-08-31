@@ -530,65 +530,64 @@ commentCard user zone time markdownBody =
         ]
 
 
-viewIssueFull : Time.Zone -> Issue -> Html Msg
+viewIssueFull : Time.Zone -> Issue -> List (Html Msg)
 viewIssueFull zone issue =
-    span [] <|
-        [ -- Title.
-          span [ class "is-size-3" ]
-            [ a [ href issue.html_url, target "_blank" ] [ text issue.title ]
-            , text " "
-            , span [ class "has-text-grey" ] [ text ("#" ++ String.fromInt issue.number) ]
-            ]
-
-        -- Labels and assignee.
-        , div [ style "margin" "0 0 0.6em 0" ]
-            (List.intersperse (text " ")
-                (issue.labels
-                    |> List.map
-                        (\l ->
-                            span
-                                [ class
-                                    ("tag has-text-weight-bold "
-                                        ++ (if isDark l.color then
-                                                "has-text-white"
-                                            else
-                                                "has-text-black"
-                                           )
-                                    )
-                                , style "background-color" ("#" ++ l.color)
-                                ]
-                                [ text l.name ]
-                        )
-                )
-                ++ [ if List.isEmpty issue.labels then
-                        text ""
-                     else
-                        span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
-                   , text "assigned to: "
-                   ]
-                ++ (if List.isEmpty issue.assignees then
-                        [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
-                    else
-                        List.intersperse (text ", ")
-                            (List.map (\user -> text user.login) issue.assignees)
-                   )
-            )
-
-        -- Issue body.
-        , commentCard issue.user
-            zone
-            (Maybe.withDefault (Time.millisToPosix 0) issue.creation_time)
-            issue.body
+    [ -- Title.
+      span [ class "is-size-3" ]
+        [ a [ href issue.html_url, target "_blank" ] [ text issue.title ]
+        , text " "
+        , span [ class "has-text-grey" ] [ text ("#" ++ String.fromInt issue.number) ]
         ]
-            ++ (Dict.values issue.comments
-                    |> List.map
-                        (\comment ->
-                            commentCard comment.user
-                                zone
-                                (Maybe.withDefault (Time.millisToPosix 0) comment.creation_time)
-                                comment.body
-                        )
+
+    -- Labels and assignee.
+    , div [ style "margin" "0 0 0.6em 0" ]
+        (List.intersperse (text " ")
+            (issue.labels
+                |> List.map
+                    (\l ->
+                        span
+                            [ class
+                                ("tag has-text-weight-bold "
+                                    ++ (if isDark l.color then
+                                            "has-text-white"
+                                        else
+                                            "has-text-black"
+                                       )
+                                )
+                            , style "background-color" ("#" ++ l.color)
+                            ]
+                            [ text l.name ]
+                    )
+            )
+            ++ [ if List.isEmpty issue.labels then
+                    text ""
+                 else
+                    span [ class "has-text-grey", style "margin" "0 .5em" ] [ text "|" ]
+               , text "assigned to: "
+               ]
+            ++ (if List.isEmpty issue.assignees then
+                    [ span [ class "has-text-grey-light is-italic" ] [ text "nobody" ] ]
+                else
+                    List.intersperse (text ", ")
+                        (List.map (\user -> text user.login) issue.assignees)
                )
+        )
+
+    -- Issue body.
+    , commentCard issue.user
+        zone
+        (Maybe.withDefault (Time.millisToPosix 0) issue.creation_time)
+        issue.body
+    ]
+        ++ (Dict.values issue.comments
+                |> List.map
+                    (\comment ->
+                        commentCard comment.user
+                            zone
+                            (Maybe.withDefault (Time.millisToPosix 0) comment.creation_time)
+                            comment.body
+                    )
+           )
 
 
 issueListColumn : Model -> Int -> Html Msg
@@ -802,7 +801,7 @@ view model =
                             (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
                         , div [ class "columns is-centered", style "margin" "0" ]
                             [ div [ class "column is-10" ]
-                                [ Maybe.withDefault help (Maybe.map (viewIssueFull model.timeZone) model.issue) ]
+                                (Maybe.withDefault [ help ] (Maybe.map (viewIssueFull model.timeZone) model.issue))
                             ]
                         , if model.loadingComments then
                             div [ class "has-text-centered" ]
