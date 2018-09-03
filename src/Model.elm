@@ -23,7 +23,6 @@ type Msg
     | SetRepo String
     | LogOut
       -- External things.
-    | GotStorageValue ( String, Maybe String )
     | DoFocus String
     | FocusDone String (Result Browser.Dom.Error ())
     | InputFocused Bool
@@ -78,17 +77,23 @@ type alias Location =
     }
 
 
+type alias Settings =
+    { token : Maybe String
+    , repo : String
+    , labelColumns : List ( String, Int )
+    }
+
+
 type alias Model =
     { pendingToken : String
-    , token : Maybe String
     , search : String
-    , repo : String
     , issues : Dict Int Issue
     , loading : Bool
     , loadingComments : Bool
     , inputIsFocused : Bool
     , timeZone : Time.Zone
     , labelsChangeToConfirm : Maybe { issue : Issue, labels : List String }
+    , settings : Settings
 
     -- The currently displayed issue and the location of the highlighted
     , issue : Maybe Issue

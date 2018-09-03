@@ -23,13 +23,10 @@
 
       let app = Elm.Main.init(
         {
-          flags: {token: localStorage.getItem('token'),
-                  repo: localStorage.getItem('repo')}
+          flags: JSON.parse(localStorage.getItem('settings')) || {}
         }
       );
-      app.ports.set.subscribe((args) => {localStorage.setItem(args[0], args[1])});
-      app.ports.get.subscribe((key) => {app.ports.recv.send([key, localStorage.getItem(key)])});
-      app.ports.del.subscribe((key) => {localStorage.removeItem(key)});
+      app.ports.storeSettings.subscribe((settings) => {localStorage.setItem('settings', JSON.stringify(settings))});
       app.ports.windowOpen.subscribe((url) => window.open(url, '_blank'));
     </script>
   </body>

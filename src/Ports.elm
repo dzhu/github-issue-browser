@@ -3,19 +3,12 @@ port module Ports exposing (..)
 {-| Ports.
 -}
 
+import Model
 
-{-| Local storage.
+
+{-| Put settings into storage.
 -}
-port set : ( String, Maybe String ) -> Cmd msg
-
-
-port del : String -> Cmd msg
-
-
-port get : String -> Cmd msg
-
-
-port recv : (( String, Maybe String ) -> msg) -> Sub msg
+port storeSettings : Model.Settings -> Cmd msg
 
 
 {-| Call JS window.open.

@@ -24,14 +24,10 @@ import Task
 import Time
 
 
-type alias Flags =
-    { token : Maybe String, repo : Maybe String }
-
-
 {-| Configuration: List of priority labels and the columns they should go into.
 -}
-priorityLabelColumns : List ( String, number )
-priorityLabelColumns =
+defaultLabelColumns : List ( String, number )
+defaultLabelColumns =
     [ ( "p1", 0 )
     , ( "p2", 1 )
     , ( "p3", 1 )
@@ -40,9 +36,9 @@ priorityLabelColumns =
 
 {-| All names of priority labels.
 -}
-priorityLabels : Set String
-priorityLabels =
-    priorityLabelColumns |> List.map Tuple.first |> Set.fromList
+labelNames : Settings -> Set String
+labelNames settings =
+    settings.labelColumns |> List.map Tuple.first |> Set.fromList
 
 
 textInput : List (Attribute Msg) -> Html Msg
@@ -61,12 +57,12 @@ textInput attributes =
 
 baseUrl : Model -> String
 baseUrl model =
-    "https://api.github.com/repos/" ++ model.repo ++ "/"
+    "https://api.github.com/repos/" ++ model.settings.repo ++ "/"
 
 
-extraColumnIndex : Int
-extraColumnIndex =
-    1 + Maybe.withDefault -1 (List.map Tuple.second priorityLabelColumns |> List.maximum)
+extraColumnIndex : List ( String, Int ) -> Int
+extraColumnIndex labelColumns =
+    1 + Maybe.withDefault -1 (List.map Tuple.second labelColumns |> List.maximum)
 
 
 getIssues : Maybe String -> String -> Cmd Msg
@@ -123,37 +119,78 @@ decodeIssue =
         |> hardcoded Dict.empty
 
 
-init : Flags -> ( Model, Cmd Msg )
-init flags =
+defaultSettings : Settings
+defaultSettings =
+    { token = Nothing
+    , repo = ""
+    , labelColumns = defaultLabelColumns
+    }
+
+
+decodeSettings : Decoder Settings
+decodeSettings =
+    succeed Settings
+        |> optional "token" (D.map Just string) defaultSettings.token
+        |> optional "repo" string defaultSettings.repo
+        |> optional "labelColumns"
+            (list (D.map2 Tuple.pair (D.index 0 string) (D.index 1 D.int)))
+            defaultSettings.labelColumns
+
+
+init : D.Value -> ( Model, Cmd Msg )
+init value =
     let
+        settings =
+            case D.decodeValue decodeSettings value of
+                Ok s ->
+                    s
+
+                Err _ ->
+                    defaultSettings
+    in
+    initWithSettings settings
+
+
+initWithSettings : Settings -> ( Model, Cmd Msg )
+initWithSettings settings =
+    let
+        hasToken =
+            case settings.token of
+                Just _ ->
+                    True
+
+                _ ->
+                    False
+
         model =
             { pendingToken = ""
-            , token = flags.token
             , search = ""
-            , repo = Maybe.withDefault "" flags.repo
             , issues = Dict.empty
             , location = { column = -1, row = -1 }
             , issue = Nothing
-            , loading = False
+            , loading = hasToken
             , loadingComments = False
             , inputIsFocused = False
             , timeZone = Time.utc
             , labelsChangeToConfirm = Nothing
+            , settings = settings
             }
     in
     ( model
-      -- TODO weirdly, leaving out the `get` prevents 'o'-to-open from working
-      -- later, but I don't see why that should be.
-    , Cmd.batch [ Ports.get "token", Task.perform GotTimeZone Time.here ]
+    , Cmd.batch
+        [ Task.perform GotTimeZone Time.here
+        , if hasToken then
+            getIssues model.settings.token (baseUrl model ++ "issues?per_page=100")
+          else
+            Cmd.none
+        ]
     )
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ Browser.Events.onKeyUp (D.field "keyCode" D.int |> D.map GlobalKeyUp)
-        , Ports.recv GotStorageValue
-        ]
+        [ Browser.Events.onKeyUp (D.field "keyCode" D.int |> D.map GlobalKeyUp) ]
 
 
 updateWithResponse : ResponseMsg -> Model -> ( Model, Cmd Msg )
@@ -167,7 +204,7 @@ updateWithResponse resp model =
                 ( loading, newCmd ) =
                     case maybeNext of
                         Just next ->
-                            ( True, getIssues model.token next )
+                            ( True, getIssues model.settings.token next )
 
                         _ ->
                             ( False, Cmd.none )
@@ -187,7 +224,7 @@ updateWithResponse resp model =
                 ( loadingComments, newCmd ) =
                     case maybeNext of
                         Just next ->
-                            ( True, getComments model.token issue next )
+                            ( True, getComments model.settings.token issue next )
 
                         _ ->
                             ( False, Cmd.none )
@@ -215,27 +252,16 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
-        GotStorageValue ( key, value ) ->
-            let
-                msg2 =
-                    case key of
-                        "token" ->
-                            SetToken value
-
-                        "repo" ->
-                            SetRepo (Maybe.withDefault "" value)
-
-                        _ ->
-                            NoOp
-            in
-            update msg2 model
-
         LogOut ->
             let
                 ( newModel, _ ) =
-                    init { token = Nothing, repo = Nothing }
+                    let
+                        s =
+                            model.settings
+                    in
+                    initWithSettings { s | token = Nothing }
             in
-            ( { newModel | repo = model.repo }, Ports.del "token" )
+            ( newModel, Ports.storeSettings newModel.settings )
 
         DoOpenIssueWindow issue ->
             ( model, Ports.windowOpen issue.html_url )
@@ -268,7 +294,7 @@ update msg model =
                                     LabelsChanged issue labels2
                     in
                     ( { model | labelsChangeToConfirm = Nothing }
-                    , ghPut body model.token procResult (list decodeLabel) url
+                    , ghPut body model.settings.token procResult (list decodeLabel) url
                     )
 
                 Nothing ->
@@ -293,15 +319,6 @@ update msg model =
             ( { model | issues = issues, issue = Maybe.map updateIssue model.issue }, Cmd.none )
 
         FocusDone id result ->
-            let
-                _ =
-                    case result of
-                        Err err ->
-                            ()
-
-                        _ ->
-                            ()
-            in
             ( model, Cmd.none )
 
         InputFocused f ->
@@ -311,22 +328,32 @@ update msg model =
             ( { model | pendingToken = s }, Cmd.none )
 
         SetToken maybeToken ->
-            ( { model | pendingToken = "", token = maybeToken, loading = True }
-            , Cmd.batch
-                [ case maybeToken of
-                    Just _ ->
-                        Cmd.batch
-                            [ Ports.set ( "token", maybeToken )
-                            , getIssues maybeToken (baseUrl model ++ "issues?per_page=100")
-                            ]
+            let
+                oldSettings =
+                    model.settings
 
-                    Nothing ->
-                        Ports.del "token"
+                settings =
+                    { oldSettings | token = maybeToken }
+
+                newModel =
+                    { model | pendingToken = "", settings = settings, loading = True }
+            in
+            ( newModel
+            , Cmd.batch
+                [ Ports.storeSettings settings
+                , getIssues maybeToken (baseUrl model ++ "issues?per_page=100")
                 ]
             )
 
         SetRepo r ->
-            ( { model | repo = r }, Ports.set ( "repo", Just r ) )
+            let
+                oldSettings =
+                    model.settings
+
+                settings =
+                    { oldSettings | repo = r }
+            in
+            ( { model | settings = settings }, Ports.storeSettings settings )
 
         GlobalKeyUp k ->
             update
@@ -358,7 +385,7 @@ update msg model =
                                     k - 49
 
                                 maybeLabel =
-                                    List.drop ind priorityLabelColumns |> List.head |> Maybe.map Tuple.first
+                                    List.drop ind model.settings.labelColumns |> List.head |> Maybe.map Tuple.first
                             in
                             case ( maybeLabel, model.issue ) of
                                 ( Just label, Just issue ) ->
@@ -367,7 +394,7 @@ update msg model =
                                             List.map .name issue.labels |> Set.fromList
 
                                         labels =
-                                            Set.diff origLabels priorityLabels
+                                            Set.diff origLabels (labelNames model.settings)
                                                 |> Set.insert label
                                                 |> Set.toList
                                     in
@@ -377,7 +404,7 @@ update msg model =
                                     NoOp
                         else if k == 82 then
                             -- 'r' -> refresh issue list
-                            SetToken model.token
+                            SetToken model.settings.token
                         else
                             NoOp
                 )
@@ -397,7 +424,7 @@ update msg model =
         DoGetComments issue ->
             if Just issue.number == Maybe.map .number model.issue then
                 ( { model | loadingComments = True }
-                , getComments model.token issue (baseUrl model ++ "issues/" ++ String.fromInt issue.number ++ "/comments")
+                , getComments model.settings.token issue (baseUrl model ++ "issues/" ++ String.fromInt issue.number ++ "/comments")
                 )
             else
                 ( model, Cmd.none )
@@ -406,8 +433,8 @@ update msg model =
             updateWithResponse resp model
 
 
-findColumnIndex : Issue -> Int
-findColumnIndex issue =
+findColumnIndex : List ( String, Int ) -> Issue -> Int
+findColumnIndex labelColumns issue =
     let
         issueLabels =
             List.map .name issue.labels |> Set.fromList
@@ -415,7 +442,7 @@ findColumnIndex issue =
         impl vals =
             case vals of
                 [] ->
-                    extraColumnIndex
+                    extraColumnIndex labelColumns
 
                 hd :: tl ->
                     if Set.member (Tuple.first hd) issueLabels then
@@ -423,12 +450,12 @@ findColumnIndex issue =
                     else
                         impl tl
     in
-    impl priorityLabelColumns
+    impl labelColumns
 
 
-issueMatch : String -> Int -> Issue -> Bool
-issueMatch str col issue =
-    (col == findColumnIndex issue)
+issueMatch : List ( String, Int ) -> String -> Int -> Issue -> Bool
+issueMatch labelColumns str col issue =
+    (col == findColumnIndex labelColumns issue)
         && Search.match (Search.parse str) issue
 
 
@@ -595,11 +622,11 @@ issueListColumn model col =
     let
         issues =
             Dict.values model.issues
-                |> List.filter (issueMatch model.search col)
+                |> List.filter (issueMatch model.settings.labelColumns model.search col)
                 |> List.reverse
 
         columnLabels =
-            priorityLabelColumns
+            model.settings.labelColumns
                 |> List.filterMap
                     (\( l, c ) ->
                         if c == col then
@@ -662,13 +689,13 @@ issueListColumn model col =
         ]
 
 
-keybindHelp : List ( String, String )
-keybindHelp =
+keybindHelp : Settings -> List ( String, String )
+keybindHelp settings =
     [ ( "/", "focus search box" )
     , ( "o", "open current issue in new window" )
     , ( "r", "refresh issue list" )
     ]
-        ++ List.indexedMap (\i l -> ( String.fromInt (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) priorityLabelColumns
+        ++ List.indexedMap (\i l -> ( String.fromInt (i + 1), "set issue priority to \"" ++ Tuple.first l ++ "\"" )) settings.labelColumns
 
 
 searchHelp : Html Msg
@@ -687,8 +714,8 @@ searchHelp =
         ]
 
 
-help : Html Msg
-help =
+help : Settings -> Html Msg
+help settings =
     div [ class "content" ]
         [ div [ class "is-size-4" ] [ text "Keybindings" ]
         , ul []
@@ -699,7 +726,7 @@ help =
                         , text (": " ++ Tuple.second info)
                         ]
                 )
-                keybindHelp
+                (keybindHelp settings)
             )
         , div [ class "is-size-4" ] [ text "Search" ]
         , searchHelp
@@ -723,10 +750,10 @@ viewUnauthorized model =
                 ]
             , div [ class "field" ]
                 [ div [ class "control" ]
-                    [ textInput [ placeholder "GitHub repo (\"owner/name\")", value model.repo, onInput SetRepo ] ]
+                    [ textInput [ placeholder "GitHub repo (\"owner/name\")", value model.settings.repo, onInput SetRepo ] ]
                 ]
             ]
-        , help
+        , help model.settings
         ]
 
 
@@ -770,7 +797,7 @@ view model =
                     text ""
 
         body =
-            case model.token of
+            case model.settings.token of
                 Nothing ->
                     [ viewUnauthorized model ]
 
@@ -798,10 +825,10 @@ view model =
                             ]
                         , div
                             [ class "columns is-gapless", style "margin-bottom" "0" ]
-                            (List.map (issueListColumn model) (List.range 0 extraColumnIndex))
+                            (List.map (issueListColumn model) (List.range 0 (extraColumnIndex model.settings.labelColumns)))
                         , div [ class "columns is-centered", style "margin" "0" ]
                             [ div [ class "column is-10" ]
-                                (Maybe.withDefault [ help ] (Maybe.map (viewIssueFull model.timeZone) model.issue))
+                                (Maybe.withDefault [ help model.settings ] (Maybe.map (viewIssueFull model.timeZone) model.issue))
                             ]
                         , if model.loadingComments then
                             div [ class "has-text-centered" ]
@@ -814,6 +841,6 @@ view model =
     { title = title, body = body }
 
 
-main : Program Flags Model Msg
+main : Program D.Value Model Msg
 main =
     Browser.document { init = init, view = view, update = update, subscriptions = subscriptions }
